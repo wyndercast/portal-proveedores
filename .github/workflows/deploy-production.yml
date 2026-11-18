@@ -130,12 +130,26 @@ jobs:
           set -euo pipefail
           app_json="$(mktemp)"
           payload="$(mktemp)"
-          trap 'rm -f "${app_json}" "${payload}"' EXIT
+          app_response="$(mktemp)"
+          trap 'rm -f "${app_json}" "${payload}" "${app_response}"' EXIT
 
-          curl --fail-with-body --silent --show-error \
+          if [[ ! "${APP_ID}" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+            echo 'DIGITALOCEAN_BACKEND_APP_ID must be a UUID.' >&2
+            exit 1
+          fi
+
+          app_http_code="$(curl --silent --show-error \
             -H "Authorization: Bearer ${DO_TOKEN}" \
             -H 'Accept: application/json' \
-            "https://api.digitalocean.com/v2/apps/${APP_ID}" > "${app_json}"
+            --output "${app_response}" \
+            --write-out '%{http_code}' \
+            "https://api.digitalocean.com/v2/apps/${APP_ID}")"
+          if [[ "${app_http_code}" != 2* ]]; then
+            echo "DigitalOcean app lookup failed with HTTP ${app_http_code}:" >&2
+            jq -c . "${app_response}" 2>/dev/null || cat "${app_response}"
+            exit 1
+          fi
+          cp "${app_response}" "${app_json}"
 
           previous_deployment="$(jq -r '.app.active_deployment.id // empty' "${app_json}")"
           echo "previous_deployment=${previous_deployment}" >> "${GITHUB_OUTPUT}"
@@ -149,7 +163,7 @@ jobs:
                   end))) }' "${app_json}" > "${payload}"
 
           response="$(mktemp)"
-          trap 'rm -f "${app_json}" "${payload}" "${response}"' EXIT
+          trap 'rm -f "${app_json}" "${payload}" "${app_response}" "${response}"' EXIT
           http_code="$(curl --silent --show-error --request PUT \
             -H "Authorization: Bearer ${DO_TOKEN}" \
             -H 'Accept: application/json' \
