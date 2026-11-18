@@ -1,19 +1,18 @@
-# PLANTILLA NO DESPLEGABLE.
-# Sustituir todos los valores REPLACE_ME y completar secretos en DigitalOcean.
-# No contiene identificadores ni dominios reales.
-name: REPLACE_ME_backend_app
-region: REPLACE_ME_region
+# App Platform specification for the backend.
+# Runtime secrets remain managed in DigitalOcean and are not stored here.
+name: portal-proveedores
+region: nyc
 
 services:
-  - name: backend
+  - name: portal-proveedores-backend
     http_port: 8080
     instance_count: 1
-    instance_size_slug: REPLACE_ME_size
+    instance_size_slug: apps-s-1vcpu-1gb
     image:
       registry_type: DOCR
-      registry: REPLACE_ME_registry
-      repository: REPLACE_ME_repository
-      tag: REPLACE_ME_immutable_tag
+      registry: portal-proveedores-backend
+      repository: portal-proveedores-backend
+      digest: sha256:de59c57f2452f5f81801ad503aa6e7ba8f8a0259c6bb5304e2eefe5178f6f03a
       deploy_on_push: false
     health_check:
       http_path: /actuator/health
