@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: portal-proveedores-backend
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 40MB
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+valuekeep:
+  base-url: ${VALUEKEEP_BASE_URL:}
+  token-url: ${VALUEKEEP_TOKEN_URL:}
+  client-id: ${VALUEKEEP_CLIENT_ID:}
+  client-secret: ${VALUEKEEP_CLIENT_SECRET:}
+  tenant-key: ${VALUEKEEP_TENANT_KEY:}
+  org-key: ${VALUEKEEP_ORG_KEY:}
+  company-key: ${VALUEKEEP_COMPANY_KEY:}
+  upload-base-url: ${VALUEKEEP_UPLOAD_BASE_URL:https://cloud.valuekeep.com/app}
+  allowed-access-states: ${VALUEKEEP_ACCESS_ALLOWED_STATES:OT03,OT04}
+  allowed-source-states: ${VALUEKEEP_ALLOWED_SOURCE_STATES:}
+  # Must remain empty until the real Valuekeep transition key is approved.
+  closing-state-key: ${VALUEKEEP_CLOSING_STATE_KEY:}
+  ot-closure-enabled: ${VALUEKEEP_OT_CLOSURE_ENABLED:false}
+  close-downtime: ${VALUEKEEP_CLOSE_DOWNTIME:false}
+  apply-downtime-to-children: ${VALUEKEEP_APPLY_DOWNTIME_TO_CHILDREN:false}
+  employee-key: ${VALUEKEEP_EMPLOYEE_KEY:}
+  rate-limit: ${VALUEKEEP_RATE_LIMIT:30}
+  rate-limit-wait-seconds: ${VALUEKEEP_RATE_LIMIT_WAIT_SECONDS:60}
+  connect-timeout: ${VALUEKEEP_CONNECT_TIMEOUT:5s}
+  read-timeout: ${VALUEKEEP_READ_TIMEOUT:30s}
+
+provider-access:
+  inactivity-timeout-seconds: ${PROVIDER_ACCESS_INACTIVITY_TIMEOUT_SECONDS:1800}
+  max-attempts-per-ip: ${PROVIDER_ACCESS_MAX_ATTEMPTS_PER_IP:10}
+  max-attempts-per-ot: ${PROVIDER_ACCESS_MAX_ATTEMPTS_PER_OT:5}
+  rate-window-seconds: ${PROVIDER_ACCESS_RATE_WINDOW_SECONDS:300}
+  max-sessions: ${PROVIDER_ACCESS_MAX_SESSIONS:10000}
+
+portal:
+  frontend-origins: ${PORTAL_FRONTEND_ORIGINS:http://localhost:4200,http://192.168.1.4:4200,http://172.17.0.1:4200}
+  # Development tunnel support. Override with explicit origins in production.
+  frontend-origin-patterns: ${PORTAL_FRONTEND_ORIGIN_PATTERNS:https://*.ngrok-free.app,https://*.ngrok-free.dev,https://*.ngrok.app,https://*.ngrok.io,http://*.ngrok-free.app,http://*.ngrok-free.dev}

@@ -1,0 +1,12 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+logging:
+  level:
+    root: INFO
+
+portal:
+  # Production must use explicit frontend origins; do not allow tunnel wildcards.
+  frontend-origin-patterns: ${PORTAL_FRONTEND_ORIGIN_PATTERNS:}

@@ -1,0 +1,13 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+logging:
+  level:
+    root: INFO
+    com.autoeastern.backend.shared.integration.valuekeep: INFO
+
+portal:
+  # Development-only patterns. Production must use explicit PORTAL_FRONTEND_ORIGINS.
+  frontend-origin-patterns: ${PORTAL_FRONTEND_ORIGIN_PATTERNS:https://*.ngrok-free.app,https://*.ngrok-free.dev,https://*.ngrok.app,https://*.ngrok.io,http://*.ngrok-free.app,http://*.ngrok-free.dev}

@@ -1,0 +1,44 @@
+# PLANTILLA NO DESPLEGABLE.
+# Sustituir todos los valores REPLACE_ME y completar secretos en DigitalOcean.
+# No contiene identificadores ni dominios reales.
+name: REPLACE_ME_backend_app
+region: REPLACE_ME_region
+
+services:
+  - name: backend
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: REPLACE_ME_size
+    image:
+      registry_type: DOCR
+      registry: REPLACE_ME_registry
+      repository: REPLACE_ME_repository
+      tag: REPLACE_ME_immutable_tag
+      deploy_on_push: false
+    health_check:
+      http_path: /actuator/health
+      port: 8080
+      initial_delay_seconds: 20
+      period_seconds: 30
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+        scope: RUN_TIME
+      - key: PORT
+        value: "8080"
+        scope: RUN_TIME
+      - key: VALUEKEEP_BASE_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: VALUEKEEP_TOKEN_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: VALUEKEEP_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: VALUEKEEP_CLIENT_SECRET
+        scope: RUN_TIME
+        type: SECRET
