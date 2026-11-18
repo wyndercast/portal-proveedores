@@ -19,7 +19,6 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    environment: production
     outputs:
       commit_sha: ${{ steps.commit.outputs.sha }}
     steps:
@@ -109,6 +108,7 @@ jobs:
           IMAGE: ${{ secrets.DIGITALOCEAN_CONTAINER_REGISTRY }}/${{ secrets.DIGITALOCEAN_BACKEND_IMAGE_REPOSITORY }}:${{ needs.validate.outputs.commit_sha }}
         run: docker build --push --tag "${IMAGE}" .
       - name: Resolve image digest
+        id: image
         env:
           IMAGE: ${{ secrets.DIGITALOCEAN_CONTAINER_REGISTRY }}/${{ secrets.DIGITALOCEAN_BACKEND_IMAGE_REPOSITORY }}:${{ needs.validate.outputs.commit_sha }}
         run: |
@@ -117,9 +117,85 @@ jobs:
             echo 'Could not resolve an immutable image digest.' >&2
             exit 1
           fi
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
           echo "Published ${IMAGE}@${digest} for ${GITHUB_SHA}"
-      - name: Block until DigitalOcean app update is configured
+      - name: Update App Platform image while preserving the existing app spec
+        id: app_update
+        env:
+          APP_ID: ${{ secrets.DIGITALOCEAN_BACKEND_APP_ID }}
+          DO_TOKEN: ${{ secrets.DIGITALOCEAN_API_TOKEN }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          COMPONENT_NAME: portal-proveedores-backend
         run: |
-          echo 'Image publication is prepared, but the DigitalOcean app update and rollback procedure require approved real configuration.' >&2
-          echo 'No production deployment was executed.' >&2
+          set -euo pipefail
+          app_json="$(mktemp)"
+          payload="$(mktemp)"
+          trap 'rm -f "${app_json}" "${payload}"' EXIT
+
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${DO_TOKEN}" \
+            -H 'Accept: application/json' \
+            "https://api.digitalocean.com/v2/apps/${APP_ID}" > "${app_json}"
+
+          previous_deployment="$(jq -r '.app.active_deployment.id // empty' "${app_json}")"
+          echo "previous_deployment=${previous_deployment}" >> "${GITHUB_OUTPUT}"
+
+          jq --arg component "${COMPONENT_NAME}" --arg digest "${IMAGE_DIGEST}" \
+            '{spec: (.app.spec
+              | .services = (.services | map(
+                  if .name == $component
+                  then .image = (.image + {digest: $digest} | del(.tag))
+                  else .
+                  end))) }' "${app_json}" > "${payload}"
+
+          curl --fail-with-body --silent --show-error --request PUT \
+            -H "Authorization: Bearer ${DO_TOKEN}" \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            --data-binary "@${payload}" \
+            "https://api.digitalocean.com/v2/apps/${APP_ID}" \
+            | jq -e --arg app_id "${APP_ID}" '.app.id == $app_id' > /dev/null
+
+          echo "App Platform spec updated to digest ${IMAGE_DIGEST}."
+      - name: Wait for App Platform deployment
+        env:
+          APP_ID: ${{ secrets.DIGITALOCEAN_BACKEND_APP_ID }}
+          DO_TOKEN: ${{ secrets.DIGITALOCEAN_API_TOKEN }}
+          PREVIOUS_DEPLOYMENT: ${{ steps.app_update.outputs.previous_deployment }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..60}; do
+            deployment="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${DO_TOKEN}" \
+              -H 'Accept: application/json' \
+              "https://api.digitalocean.com/v2/apps/${APP_ID}/deployments?per_page=1" \
+              | jq -r '.deployments[0].id // empty')"
+            if [[ -z "${deployment}" || "${deployment}" == "${PREVIOUS_DEPLOYMENT}" ]]; then
+              echo 'Waiting for the new App Platform deployment to be created.'
+              sleep 10
+              continue
+            fi
+            phase="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${DO_TOKEN}" \
+              -H 'Accept: application/json' \
+              "https://api.digitalocean.com/v2/apps/${APP_ID}/deployments/${deployment}" \
+              | jq -r '.deployment.phase // empty')"
+
+            echo "Deployment ${deployment:-pending}: ${phase:-PENDING}"
+            case "${phase}" in
+              ACTIVE) echo "App Platform deployment is active."; exit 0 ;;
+              ERROR|CANCELED) echo "App Platform deployment failed with phase ${phase}." >&2; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo 'Timed out waiting for App Platform deployment.' >&2
           exit 1
+      - name: Verify backend health
+        env:
+          BACKEND_PUBLIC_URL: https://portal-proveedores-u74ef.ondigitalocean.app
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            "${BACKEND_PUBLIC_URL}/actuator/health" \
+            | jq -e '.status == "UP"' > /dev/null
+          echo 'Backend health check passed.'
