@@ -41,6 +41,10 @@ public class SecurityConfiguration {
                 configuration.getAllowedOriginPatterns().size());
         configuration.setAllowedMethods(List.of("GET", "POST", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        configuration.setExposedHeaders(List.of(
+                "X-Report-Preview-Id",
+                "X-Report-File-Name",
+                "X-Report-Sha256"));
         configuration.setAllowCredentials(false);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
