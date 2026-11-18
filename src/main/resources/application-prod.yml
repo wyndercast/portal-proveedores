@@ -8,5 +8,7 @@ logging:
     root: INFO
 
 portal:
+  # Production origins are supplied by the deployment environment.
+  frontend-origins: ${PORTAL_FRONTEND_ORIGINS:}
   # Production must use explicit frontend origins; do not allow tunnel wildcards.
   frontend-origin-patterns: ${PORTAL_FRONTEND_ORIGIN_PATTERNS:}
