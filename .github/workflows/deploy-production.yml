@@ -144,17 +144,26 @@ jobs:
             '{spec: (.app.spec
               | .services = (.services | map(
                   if .name == $component
-                  then .image = (.image + {digest: $digest} | del(.tag))
+                  then .image = (.image + {digest: $digest, deploy_on_push: {enabled: false}} | del(.tag))
                   else .
                   end))) }' "${app_json}" > "${payload}"
 
-          curl --fail-with-body --silent --show-error --request PUT \
+          response="$(mktemp)"
+          trap 'rm -f "${app_json}" "${payload}" "${response}"' EXIT
+          http_code="$(curl --silent --show-error --request PUT \
             -H "Authorization: Bearer ${DO_TOKEN}" \
             -H 'Accept: application/json' \
             -H 'Content-Type: application/json' \
             --data-binary "@${payload}" \
-            "https://api.digitalocean.com/v2/apps/${APP_ID}" \
-            | jq -e --arg app_id "${APP_ID}" '.app.id == $app_id' > /dev/null
+            --output "${response}" \
+            --write-out '%{http_code}' \
+            "https://api.digitalocean.com/v2/apps/${APP_ID}")"
+          if [[ "${http_code}" != 2* ]]; then
+            echo "DigitalOcean App Platform update failed with HTTP ${http_code}:" >&2
+            jq -c . "${response}" 2>/dev/null || cat "${response}"
+            exit 1
+          fi
+          jq -e --arg app_id "${APP_ID}" '.app.id == $app_id' "${response}" > /dev/null
 
           echo "App Platform spec updated to digest ${IMAGE_DIGEST}."
       - name: Wait for App Platform deployment
