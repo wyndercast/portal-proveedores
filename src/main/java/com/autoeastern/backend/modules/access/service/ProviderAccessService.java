@@ -68,9 +68,9 @@ public class ProviderAccessService {
                         throw new CompletionException(new ProviderAccessException(DENIED_MESSAGE));
                     }
                     String state = currentState(workOrder);
-                    if (!allowedStates().contains(state)) {
-                        attemptLimiter.recordFailure(ipAddress, request.workOrderNumber());
-                        throw new CompletionException(new ProviderAccessException(DENIED_MESSAGE));
+                    if (!allowedStates().contains(state) && !isClosingState(state)) {
+                        throw new CompletionException(new ProviderAccessStateException(
+                                "La OT está asignada a este proveedor, pero todavía no está habilitada para iniciar el servicio porque se encuentra en un estado previo."));
                     }
 
                     ProviderSessionStore.CreatedSession created = sessionStore.create(
@@ -87,6 +87,11 @@ public class ProviderAccessService {
     private java.util.List<String> allowedStates() {
         return java.util.Arrays.stream(valuekeepProperties.getAllowedAccessStates().split(","))
                 .map(String::trim).filter(value -> !value.isBlank()).distinct().toList();
+    }
+
+    private boolean isClosingState(String state) {
+        String closingState = valuekeepProperties.getClosingStateKey();
+        return closingState != null && !closingState.isBlank() && closingState.equals(state);
     }
 
     private String currentState(ValuekeepWorkOrderResource workOrder) {

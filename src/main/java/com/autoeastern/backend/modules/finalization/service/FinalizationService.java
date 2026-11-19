@@ -62,7 +62,7 @@ public class FinalizationService {
         return valuekeepClient.get(path, ValuekeepWorkOrderResource.class).thenCompose(workOrder -> {
             String current = currentState(workOrder);
             if (!allowed.contains(current) && !properties.getClosingStateKey().equals(current)) throw new FinalizationException(HttpStatus.CONFLICT, "La OT no está en un estado permitido para finalizar.");
-            if (properties.getClosingStateKey().equals(current)) return complete(session, rawToken, "CLOSED_CONFIRMED", "ALREADY_CLOSED", current, "La OT ya estaba cerrada.");
+            if (properties.getClosingStateKey().equals(current)) throw new FinalizationException(HttpStatus.CONFLICT, "La OT ya está cerrada y no admite nuevas modificaciones.");
             return updateRemarks(session, request.remarks())
                     .thenCompose(ignored -> reportService.upload(authentication, request.previewId()))
                     .thenCompose(upload -> stateTransitionService.transition(session, properties.getClosingStateKey(), "Trabajo ejecutado, verificado y documentado."))

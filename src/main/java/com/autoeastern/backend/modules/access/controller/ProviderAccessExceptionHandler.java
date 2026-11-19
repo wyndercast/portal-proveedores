@@ -1,6 +1,7 @@
 package com.autoeastern.backend.modules.access.controller;
 
 import com.autoeastern.backend.modules.access.service.ProviderAccessException;
+import com.autoeastern.backend.modules.access.service.ProviderAccessStateException;
 import com.autoeastern.backend.shared.integration.valuekeep.exception.ValuekeepAuthenticationException;
 import com.autoeastern.backend.shared.integration.valuekeep.exception.ValuekeepClientException;
 import com.autoeastern.backend.modules.report.service.ReportValidationException;
@@ -22,10 +23,20 @@ public class ProviderAccessExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, exception.getMessage());
     }
 
+    @ExceptionHandler(ProviderAccessStateException.class)
+    ProblemDetail handleProviderAccessState(ProviderAccessStateException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, exception.getMessage());
+        problem.setProperty("code", "WORK_ORDER_STATE_NOT_AVAILABLE");
+        return problem;
+    }
+
     @ExceptionHandler(CompletionException.class)
     ProblemDetail handleCompletion(CompletionException exception) {
         if (exception.getCause() instanceof ProviderAccessException providerAccessException) {
             return handleProviderAccess(providerAccessException);
+        }
+        if (exception.getCause() instanceof ProviderAccessStateException stateException) {
+            return handleProviderAccessState(stateException);
         }
         if (exception.getCause() instanceof ValuekeepAuthenticationException
                 || exception.getCause() instanceof ValuekeepClientException) {

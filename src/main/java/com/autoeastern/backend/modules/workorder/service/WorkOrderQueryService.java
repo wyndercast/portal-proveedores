@@ -47,7 +47,8 @@ public class WorkOrderQueryService {
                 + valuekeepProperties.getCompanyKey() + "/" + session.getWorkOrderNumber();
         return valuekeepClient.get(path, ValuekeepWorkOrderResource.class)
                 .thenCompose(resource -> {
-                    if (!allowedAccessStates().contains(currentState(resource))) {
+                    if (!allowedAccessStates().contains(currentState(resource))
+                            && !isClosingState(currentState(resource))) {
                         throw new WorkOrderAccessStateException("La OT ya no está disponible para este portal en su estado actual.");
                     }
                     return enrich(resource, session);
@@ -57,6 +58,11 @@ public class WorkOrderQueryService {
     private List<String> allowedAccessStates() {
         return Arrays.stream(valuekeepProperties.getAllowedAccessStates().split(","))
                 .map(String::trim).filter(value -> !value.isBlank()).distinct().toList();
+    }
+
+    private boolean isClosingState(String state) {
+        String closingState = valuekeepProperties.getClosingStateKey();
+        return closingState != null && !closingState.isBlank() && closingState.equals(state);
     }
 
     private String currentState(ValuekeepWorkOrderResource resource) {

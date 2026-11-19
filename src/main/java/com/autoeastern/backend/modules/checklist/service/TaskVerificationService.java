@@ -29,7 +29,17 @@ public class TaskVerificationService {
     public CompletableFuture<TaskVerificationBatchResponse> saveBatch(Authentication authentication, TaskVerificationBatchRequest request) {
         ProviderSession session = authorizationService.requireAuthenticatedSession(authentication);
         String path = "maintenance/workOrders/" + properties.getCompanyKey() + "/" + session.getWorkOrderNumber();
-        return valuekeepClient.get(path, ValuekeepWorkOrderResource.class).thenCompose(workOrder -> saveSequentially(session, workOrder, request, 0, new ArrayList<>(), new HashMap<>()));
+        return valuekeepClient.get(path, ValuekeepWorkOrderResource.class).thenCompose(workOrder -> {
+            if (properties.getClosingStateKey().equals(currentState(workOrder))) {
+                throw new WorkOrderAccessStateException("La OT está cerrada y no admite nuevas verificaciones.");
+            }
+            return saveSequentially(session, workOrder, request, 0, new ArrayList<>(), new HashMap<>());
+        });
+    }
+
+    private String currentState(ValuekeepWorkOrderResource workOrder) {
+        return workOrder.schemaEntityStateKey() != null ? workOrder.schemaEntityStateKey()
+                : workOrder.state() != null ? workOrder.state() : workOrder.schemaEntityState();
     }
 
     private CompletableFuture<TaskVerificationBatchResponse> saveSequentially(ProviderSession session, ValuekeepWorkOrderResource workOrder, TaskVerificationBatchRequest request, int index, List<TaskVerificationBatchResponse.Result> results, Map<String, CompletableFuture<Map<String, Boolean>>> catalogs) {

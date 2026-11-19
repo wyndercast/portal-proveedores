@@ -3,6 +3,7 @@ package com.autoeastern.backend.modules.report.service;
 import com.autoeastern.backend.modules.access.domain.ProviderSession;
 import com.autoeastern.backend.modules.access.domain.ValuekeepWorkOrderResource;
 import com.autoeastern.backend.modules.access.service.ProviderAuthorizationService;
+import com.autoeastern.backend.modules.workorder.service.WorkOrderAccessStateException;
 import com.autoeastern.backend.modules.report.dto.ReportPreviewResponse;
 import com.autoeastern.backend.modules.report.dto.ReportUploadResponse;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepClient;
@@ -81,12 +82,21 @@ public class ReportService {
         validatePhotos(safePhotos);
         String path = "maintenance/workOrders/" + properties.getCompanyKey() + "/" + session.getWorkOrderNumber();
         return valuekeepClient.get(path, ValuekeepWorkOrderResource.class)
-                .thenCompose(workOrder -> loadStateDescriptions()
-                        .thenCompose(states -> loadWorkshopDescription(workOrder)
-                                .thenCompose(workshopDescription -> loadVerifiedTasks(session, workOrder)
-                                        .thenApply(model -> new VerifiedModel(model.workOrder(), model.tasks(), stateDescription(workOrder, states), workshopDescription)))))
+                .thenCompose(workOrder -> {
+                    if (properties.getClosingStateKey().equals(currentStateKey(workOrder))) {
+                        throw new WorkOrderAccessStateException("La OT está cerrada y no admite nuevos informes.");
+                    }
+                    return loadStateDescriptions()
+                            .thenCompose(states -> loadWorkshopDescription(workOrder)
+                                    .thenCompose(workshopDescription -> loadVerifiedTasks(session, workOrder)
+                                            .thenApply(model -> {
+                                                String reportStateKey = reportStateKey(workOrder);
+                                                return new VerifiedModel(model.workOrder(), model.tasks(), reportStateKey,
+                                                        stateDescription(reportStateKey, states), workshopDescription);
+                                            })));
+                })
                 .thenApply(model -> {
-                    Map<String, Object> view = buildView(model.workOrder(), model.tasks(), model.stateDescription(), model.workshopDescription(), remarks, technicianName.trim(), receiverName.trim(), technicianSignature, receiverSignature, safePhotos);
+                    Map<String, Object> view = buildView(model.workOrder(), model.tasks(), model.stateKey(), model.stateDescription(), model.workshopDescription(), remarks, technicianName.trim(), receiverName.trim(), technicianSignature, receiverSignature, safePhotos);
                     byte[] pdf = render(view);
                     String id = UUID.randomUUID().toString();
                     String fileName = safeFileName(session.getWorkOrderNumber());
@@ -108,12 +118,23 @@ public class ReportService {
                 });
     }
 
-    private String stateDescription(ValuekeepWorkOrderResource workOrder, Map<String, String> states) {
+    private String reportStateKey(ValuekeepWorkOrderResource workOrder) {
+        if (properties.getClosingStateKey() != null && !properties.getClosingStateKey().isBlank()) {
+            return properties.getClosingStateKey().trim();
+        }
+        return currentStateKey(workOrder);
+    }
+
+    private String currentStateKey(ValuekeepWorkOrderResource workOrder) {
         String[] candidates = {workOrder.schemaEntityStateKey(), workOrder.state(), workOrder.schemaEntityState()};
         for (String candidate : candidates) {
-            if (candidate != null && states.containsKey(candidate)) return states.get(candidate);
+            if (candidate != null && !candidate.isBlank()) return candidate;
         }
         return null;
+    }
+
+    private String stateDescription(String stateKey, Map<String, String> states) {
+        return stateKey == null ? null : states.get(stateKey);
     }
 
     private CompletableFuture<String> loadWorkshopDescription(ValuekeepWorkOrderResource workOrder) {
@@ -137,7 +158,14 @@ public class ReportService {
             }
             artifact.markUploaded();
         }
-        return valuekeepClient.uploadWorkOrderDocument(session.getWorkOrderId(), artifact.fileName(), artifact.pdf())
+        return valuekeepClient.get("maintenance/workOrders/" + properties.getCompanyKey() + "/" + session.getWorkOrderNumber(), ValuekeepWorkOrderResource.class)
+                .thenCompose(workOrder -> {
+                    if (properties.getClosingStateKey().equals(currentStateKey(workOrder))) {
+                        artifact.markNotUploaded();
+                        throw new WorkOrderAccessStateException("La OT está cerrada y no admite nuevos informes.");
+                    }
+                    return valuekeepClient.uploadWorkOrderDocument(session.getWorkOrderId(), artifact.fileName(), artifact.pdf());
+                })
                 .handle((ignored, error) -> {
                     if (error != null) {
                         artifact.markNotUploaded();
@@ -187,15 +215,15 @@ public class ReportService {
         if (tasks.isEmpty()) {
             throw new ReportValidationException("La OT no tiene respuestas de tareas guardadas para incluir en el informe.");
         }
-        return CompletableFuture.completedFuture(new VerifiedModel(workOrder, tasks, null, null));
+        return CompletableFuture.completedFuture(new VerifiedModel(workOrder, tasks, null, null, null));
     }
 
-    private Map<String, Object> buildView(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateDescription, String workshopDescription, String generalRemarks,
+    private Map<String, Object> buildView(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateKey, String stateDescription, String workshopDescription, String generalRemarks,
                                            String technicianName, String receiverName, MultipartFile technicianSignature,
                                            MultipartFile receiverSignature, List<MultipartFile> photos) {
         Map<String, Object> view = new HashMap<>();
         view.put("generatedAt", formatDateTime(OffsetDateTime.now(ZoneOffset.UTC).toString())); view.put("number", workOrder.workOrderKey());
-        view.put("description", first(workOrder.description(), workOrder.Description())); view.put("state", stateLabel(workOrder, stateDescription));
+        view.put("description", first(workOrder.description(), workOrder.Description())); view.put("state", stateLabel(stateKey, stateDescription));
         view.put("assetType", assetLabel(workOrder.asset() != null ? workOrder.asset() : workOrder.assetType()));
         view.put("assetCode", assetLabel(workOrder)); view.put("assetDescription", assetDescription(workOrder)); view.put("workshop", workshopLabel(workOrder.workshop(), workshopDescription)); view.put("operatingState", workOrder.operatingState());
         view.put("expectedDateFormatted", formatDateTime(workOrder.expectedDate()));
@@ -238,7 +266,7 @@ public class ReportService {
         catch (DateTimeParseException ignored) { return value; }
     }
     private String assetLabel(Integer asset) { return switch (asset == null ? 0 : asset) { case 1 -> "Localización"; case 2 -> "Equipamiento"; case 3 -> "Herramienta"; default -> "No disponible"; }; }
-    private String stateLabel(ValuekeepWorkOrderResource r, String description) { String state = first(r.state(), r.schemaEntityState()); if (description == null || description.isBlank()) return state; return state == null || state.isBlank() ? description : state + " - " + description; }
+    private String stateLabel(String stateKey, String description) { if (description == null || description.isBlank()) return stateKey; return stateKey == null || stateKey.isBlank() ? description : stateKey + " - " + description; }
     private String assetCode(ValuekeepWorkOrderResource r) { int a = r.asset() != null ? r.asset() : r.assetType() == null ? 0 : r.assetType(); return switch (a) { case 1 -> r.location(); case 2 -> r.equipment(); case 3 -> r.tool(); default -> null; }; }
     private String assetLabel(ValuekeepWorkOrderResource r) { return joinLabel(assetCode(r), assetDescription(r)); }
     private String workshopLabel(String workshop, String description) { if (workshop == null || workshop.isBlank()) return description; if (description == null || description.isBlank()) return workshop; return workshop + " - " + description; }
@@ -258,6 +286,6 @@ public class ReportService {
     private void cleanupExpired() { long now = System.currentTimeMillis(); previews.entrySet().removeIf(entry -> entry.getValue().expiresAt() < now); }
 
     public record GeneratedReport(byte[] pdf, ReportPreviewResponse response) { }
-    private record VerifiedModel(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateDescription, String workshopDescription) { }
+    private record VerifiedModel(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateKey, String stateDescription, String workshopDescription) { }
     private static final class PreviewArtifact { private final String workOrderId, fileName, hash; private final byte[] pdf; private final long expiresAt; private boolean uploaded; PreviewArtifact(String w, String f, String h, byte[] p, long e) { workOrderId=w; fileName=f; hash=h; pdf=p; expiresAt=e; } String workOrderId(){return workOrderId;} String fileName(){return fileName;} byte[] pdf(){return pdf;} long expiresAt(){return expiresAt;} boolean uploaded(){return uploaded;} void markUploaded(){uploaded=true;} void markNotUploaded(){uploaded=false;} }
 }
