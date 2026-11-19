@@ -3,6 +3,7 @@ package com.autoeastern.backend.modules.checklist.service;
 import com.autoeastern.backend.modules.access.domain.ProviderSession;
 import com.autoeastern.backend.modules.access.domain.ValuekeepWorkOrderResource;
 import com.autoeastern.backend.modules.access.service.ProviderAuthorizationService;
+import com.autoeastern.backend.modules.workorder.service.WorkOrderAccessStateException;
 import com.autoeastern.backend.modules.checklist.dto.TaskVerificationBatchRequest;
 import com.autoeastern.backend.modules.checklist.dto.TaskVerificationBatchResponse;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepClient;
