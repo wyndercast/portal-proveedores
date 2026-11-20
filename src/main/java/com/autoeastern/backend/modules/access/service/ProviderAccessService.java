@@ -70,7 +70,7 @@ public class ProviderAccessService {
                     String state = currentState(workOrder);
                     if (!allowedStates().contains(state) && !isClosingState(state)) {
                         throw new CompletionException(new ProviderAccessStateException(
-                                "La OT está asignada a este proveedor, pero todavía no está habilitada para iniciar el servicio porque se encuentra en un estado previo."));
+                                unavailableStateMessage(workOrder, state)));
                     }
 
                     ProviderSessionStore.CreatedSession created = sessionStore.create(
@@ -92,6 +92,18 @@ public class ProviderAccessService {
     private boolean isClosingState(String state) {
         String closingState = valuekeepProperties.getClosingStateKey();
         return closingState != null && !closingState.isBlank() && closingState.equals(state);
+    }
+
+    private String unavailableStateMessage(ValuekeepWorkOrderResource workOrder, String state) {
+        String stateLabel = workOrder.schemaEntityStateDescription();
+        if (stateLabel == null || stateLabel.isBlank()) {
+            stateLabel = state;
+        }
+        if (stateLabel == null || stateLabel.isBlank()) {
+            stateLabel = "sin estado identificado";
+        }
+        return "La OT está asignada a este proveedor, pero actualmente se encuentra en estado «"
+                + stateLabel + "», el cual no está habilitado para su consulta desde el portal.";
     }
 
     private String currentState(ValuekeepWorkOrderResource workOrder) {

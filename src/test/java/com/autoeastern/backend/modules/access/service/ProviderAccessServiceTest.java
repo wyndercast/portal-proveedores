@@ -71,5 +71,6 @@ class ProviderAccessServiceTest {
                 "company").join());
 
         org.junit.jupiter.api.Assertions.assertInstanceOf(ProviderAccessStateException.class, exception.getCause());
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getCause().getMessage().contains("OT02"));
     }
 }
