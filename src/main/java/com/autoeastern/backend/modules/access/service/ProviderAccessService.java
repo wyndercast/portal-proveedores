@@ -95,15 +95,38 @@ public class ProviderAccessService {
     }
 
     private String unavailableStateMessage(ValuekeepWorkOrderResource workOrder, String state) {
-        String stateLabel = workOrder.schemaEntityStateDescription();
-        if (stateLabel == null || stateLabel.isBlank()) {
-            stateLabel = state;
-        }
-        if (stateLabel == null || stateLabel.isBlank()) {
+        String stateCode = workOrder.schemaEntityStateKey();
+        String stateDescription = normalizeRepeatedText(workOrder.schemaEntityStateDescription());
+        String stateLabel;
+        if (hasText(stateCode) && hasText(stateDescription)) {
+            stateLabel = stateCode.trim() + " - " + stateDescription.trim();
+        } else if (hasText(stateCode)) {
+            stateLabel = stateCode.trim();
+        } else if (hasText(stateDescription)) {
+            stateLabel = stateDescription.trim();
+        } else if (hasText(state)) {
+            stateLabel = state.trim();
+        } else {
             stateLabel = "sin estado identificado";
         }
         return "La OT está asignada a este proveedor, pero actualmente se encuentra en estado «"
                 + stateLabel + "», el cual no está habilitado para su consulta desde el portal.";
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private String normalizeRepeatedText(String value) {
+        if (!hasText(value)) {
+            return value;
+        }
+        String text = value.trim();
+        int halfLength = text.length() / 2;
+        if (text.length() % 2 == 0 && text.substring(0, halfLength).equals(text.substring(halfLength))) {
+            return text.substring(0, halfLength);
+        }
+        return text;
     }
 
     private String currentState(ValuekeepWorkOrderResource workOrder) {
