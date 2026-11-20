@@ -24,4 +24,4 @@ jobs:
           java-version: '17'
           cache: maven
       - name: Compile and test
-        run: ./mvnw -B test
+        run: mvn -B test
