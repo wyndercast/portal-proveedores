@@ -24,4 +24,16 @@ jobs:
           java-version: '17'
           cache: maven
       - name: Compile and test
-        run: mvn -B test
+        run: |
+          set -euo pipefail
+          if mvn -B -o test; then
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            echo "Maven online retry ${attempt}/3"
+            if mvn -B -Dmaven.wagon.http.retryHandler.count=3 test; then
+              exit 0
+            fi
+            sleep $((attempt * 20))
+          done
+          exit 1
