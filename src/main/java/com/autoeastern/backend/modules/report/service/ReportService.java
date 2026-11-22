@@ -9,6 +9,7 @@ import com.autoeastern.backend.modules.report.dto.ReportUploadResponse;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepClient;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepSchemaEntityStatesResource;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepWorkshopResource;
+import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepOperatingStateResource;
 import com.autoeastern.backend.shared.integration.valuekeep.config.ValuekeepProperties;
 import com.autoeastern.backend.shared.integration.valuekeep.exception.ValuekeepClientException;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
@@ -95,15 +96,16 @@ public class ReportService {
                                                         stateDescription(reportStateKey, states), workshopDescription);
                                             })));
                 })
-                .thenApply(model -> {
-                    Map<String, Object> view = buildView(model.workOrder(), model.tasks(), model.stateKey(), model.stateDescription(), model.workshopDescription(), remarks, technicianName.trim(), receiverName.trim(), technicianSignature, receiverSignature, safePhotos);
-                    byte[] pdf = render(view);
-                    String id = UUID.randomUUID().toString();
-                    String fileName = safeFileName(session.getWorkOrderNumber());
-                    String hash = sha256(pdf);
-                    previews.put(id, new PreviewArtifact(model.workOrder().id(), fileName, hash, pdf, System.currentTimeMillis() + PREVIEW_TTL_MILLIS));
-                    return new GeneratedReport(pdf, new ReportPreviewResponse(id, fileName, hash));
-                });
+                .thenCompose(model -> loadOperatingStateDescription(model.workOrder())
+                        .thenApply(operatingStateDescription -> {
+                            Map<String, Object> view = buildView(model.workOrder(), model.tasks(), model.stateKey(), model.stateDescription(), model.workshopDescription(), operatingStateDescription, remarks, technicianName.trim(), receiverName.trim(), technicianSignature, receiverSignature, safePhotos);
+                            byte[] pdf = render(view);
+                            String id = UUID.randomUUID().toString();
+                            String fileName = safeFileName(session.getWorkOrderNumber());
+                            String hash = sha256(pdf);
+                            previews.put(id, new PreviewArtifact(model.workOrder().id(), fileName, hash, pdf, System.currentTimeMillis() + PREVIEW_TTL_MILLIS));
+                            return new GeneratedReport(pdf, new ReportPreviewResponse(id, fileName, hash));
+                        }));
     }
 
     private CompletableFuture<Map<String, String>> loadStateDescriptions() {
@@ -141,6 +143,20 @@ public class ReportService {
         if (workOrder.workshop() == null || workOrder.workshop().isBlank()) return CompletableFuture.completedFuture(null);
         return valuekeepClient.get("workShopsCore/workshops/" + workOrder.workshop(), ValuekeepWorkshopResource.class)
                 .handle((workshop, error) -> error == null && workshop != null ? workshop.resolvedDescription() : null);
+    }
+
+    private CompletableFuture<String> loadOperatingStateDescription(ValuekeepWorkOrderResource workOrder) {
+        String operatingStateKey = workOrder.operatingState();
+        String fallback = workOrder.operatingStateDescription();
+        if (operatingStateKey == null || operatingStateKey.isBlank()) return CompletableFuture.completedFuture(fallback);
+        try {
+            return valuekeepClient.get("maintenanceCore/operatingStates/" + operatingStateKey, ValuekeepOperatingStateResource.class)
+                    .handle((operatingState, error) -> error == null && operatingState != null
+                            && operatingState.description() != null && !operatingState.description().isBlank()
+                            ? operatingState.description() : fallback);
+        } catch (RuntimeException exception) {
+            return CompletableFuture.completedFuture(fallback);
+        }
     }
 
     public byte[] previewBytes(String previewId, Authentication authentication) {
@@ -218,23 +234,31 @@ public class ReportService {
         return CompletableFuture.completedFuture(new VerifiedModel(workOrder, tasks, null, null, null));
     }
 
-    private Map<String, Object> buildView(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateKey, String stateDescription, String workshopDescription, String generalRemarks,
+    private Map<String, Object> buildView(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateKey, String stateDescription, String workshopDescription, String operatingStateDescription, String generalRemarks,
                                            String technicianName, String receiverName, MultipartFile technicianSignature,
                                            MultipartFile receiverSignature, List<MultipartFile> photos) {
         Map<String, Object> view = new HashMap<>();
         view.put("generatedAt", formatDateTime(OffsetDateTime.now(ZoneOffset.UTC).toString())); view.put("number", workOrder.workOrderKey());
         view.put("description", first(workOrder.description(), workOrder.Description())); view.put("state", stateLabel(stateKey, stateDescription));
         view.put("assetType", assetLabel(workOrder.asset() != null ? workOrder.asset() : workOrder.assetType()));
-        view.put("assetCode", assetLabel(workOrder)); view.put("assetDescription", assetDescription(workOrder)); view.put("workshop", workshopLabel(workOrder.workshop(), workshopDescription)); view.put("operatingState", workOrder.operatingState());
+        view.put("assetCode", assetLabel(workOrder)); view.put("assetDescription", assetDescription(workOrder)); view.put("workshop", workshopLabel(workOrder.workshop(), workshopDescription)); view.put("operatingState", displayOperatingState(workOrder.operatingState(), operatingStateDescription));
         view.put("expectedDateFormatted", formatDateTime(workOrder.expectedDate()));
         view.put("expectedEndDateFormatted", formatDateTime(workOrder.expectedEndDate()));
-        view.put("tasks", tasks); view.put("generalRemarks", generalRemarks == null ? "" : generalRemarks.trim());
+        view.put("tasks", tasks);
+        view.put("serviceRemarks", workOrder.remarks() == null ? "" : workOrder.remarks().trim());
+        view.put("generalRemarks", generalRemarks == null ? "" : generalRemarks.trim());
         view.put("logoData", logoDataUri());
         view.put("technicianName", technicianName); view.put("receiverName", receiverName);
         view.put("technicianSignature", dataUri(technicianSignature, "image/png")); view.put("receiverSignature", dataUri(receiverSignature, "image/png"));
         List<Map<String, Object>> photoRows = new ArrayList<>();
         for (int i = 0; i < photos.size(); i++) { Map<String, Object> row = new HashMap<>(); row.put("number", i + 1); row.put("data", dataUri(photos.get(i), photos.get(i).getContentType())); photoRows.add(row); }
         view.put("photos", photoRows); return view;
+    }
+
+    private String displayOperatingState(String code, String description) {
+        if (code == null || code.isBlank()) return description;
+        if (description == null || description.isBlank()) return code;
+        return code + " - " + description;
     }
 
     private byte[] render(Map<String, Object> view) {

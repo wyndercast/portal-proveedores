@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.slf4j.Logger;
@@ -107,6 +108,64 @@ public class ValuekeepRestClient implements ValuekeepClient {
                 throw exception;
             } catch (Exception exception) {
                 throw new ValuekeepClientException("No fue posible cargar el informe en Valuekeep.", 502, exception);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<List<ValuekeepWorkOrderAttachment>> getWorkOrderAttachments(String workOrderId) {
+        return rateLimiter.acquire().thenApplyAsync(ignored -> {
+            String token = tokenService.getAccessToken();
+            URI uri = buildAttachmentsUri(workOrderId);
+            try {
+                return restClient.get().uri(uri)
+                        .headers(headers -> { headers.setBearerAuth(token); headers.setAccept(List.of(MediaType.APPLICATION_JSON)); })
+                        .exchange((request, response) -> {
+                            int status = response.getStatusCode().value();
+                            if (status < 200 || status >= 300) throw valuekeepError("consultar adjuntos", status, response);
+                            byte[] body = response.getBody() == null ? new byte[0] : response.getBody().readAllBytes();
+                            if (body.length == 0) return List.of();
+                            try {
+                                return Arrays.asList(objectMapper.readValue(body, ValuekeepWorkOrderAttachment[].class));
+                            } catch (JacksonException exception) {
+                                throw new ValuekeepClientException("La respuesta de adjuntos de Valuekeep no tiene un formato válido.", 502, exception);
+                            }
+                        });
+            } catch (ResourceAccessException exception) {
+                throw new ValuekeepTimeoutException("Timeout al consultar los adjuntos de Valuekeep.", exception);
+            } catch (ValuekeepClientException exception) {
+                if (exception.getStatusCode() == 401) tokenService.invalidate(token);
+                throw exception;
+            } catch (Exception exception) {
+                throw new ValuekeepClientException("No fue posible consultar los adjuntos de Valuekeep.", 502, exception);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<AttachmentContent> downloadWorkOrderAttachment(String workOrderId, String fileName, int index) {
+        return rateLimiter.acquire().thenApplyAsync(ignored -> {
+            String token = tokenService.getAccessToken();
+            URI uri = buildAttachmentUri(workOrderId, fileName, index);
+            try {
+                return restClient.get().uri(uri)
+                        .headers(headers -> { headers.setBearerAuth(token); headers.setAccept(List.of(MediaType.ALL)); })
+                        .exchange((request, response) -> {
+                            int status = response.getStatusCode().value();
+                            if (status < 200 || status >= 300) throw valuekeepError("descargar el adjunto", status, response);
+                            byte[] body = response.getBody() == null ? new byte[0] : response.getBody().readAllBytes();
+                            String mediaType = response.getHeaders().getContentType() == null
+                                    ? MediaType.APPLICATION_OCTET_STREAM_VALUE
+                                    : response.getHeaders().getContentType().toString();
+                            return new AttachmentContent(body, mediaType);
+                        });
+            } catch (ResourceAccessException exception) {
+                throw new ValuekeepTimeoutException("Timeout al descargar el adjunto de Valuekeep.", exception);
+            } catch (ValuekeepClientException exception) {
+                if (exception.getStatusCode() == 401) tokenService.invalidate(token);
+                throw exception;
+            } catch (Exception exception) {
+                throw new ValuekeepClientException("No fue posible descargar el adjunto de Valuekeep.", 502, exception);
             }
         }, executor);
     }
@@ -237,6 +296,25 @@ public class ValuekeepRestClient implements ValuekeepClient {
         return UriComponentsBuilder.fromUriString(properties.getUploadBaseUrl())
                 .pathSegment(properties.getTenantKey(), properties.getOrgKey(), "maintenance", "workorders", workOrderId, "upload")
                 .build().encode().toUri();
+    }
+
+    private URI buildAttachmentsUri(String workOrderId) {
+        return UriComponentsBuilder.fromUriString(properties.getUploadBaseUrl())
+                .pathSegment(properties.getTenantKey(), properties.getOrgKey(), "maintenance", "workorders", workOrderId, "attachments")
+                .build().encode().toUri();
+    }
+
+    private URI buildAttachmentUri(String workOrderId, String fileName, int index) {
+        return UriComponentsBuilder.fromUriString(properties.getUploadBaseUrl())
+                .pathSegment(properties.getTenantKey(), properties.getOrgKey(), "maintenance", "workorders", workOrderId, "attachment")
+                .queryParam("fileName", fileName)
+                .queryParam("index", index)
+                .build().encode().toUri();
+    }
+
+    private ValuekeepClientException valuekeepError(String action, int status, org.springframework.http.client.ClientHttpResponse response) {
+        return new ValuekeepClientException("Valuekeep rechazó " + action + " con HTTP " + status, status,
+                parseRetryAfter(response.getHeaders().getFirst("Retry-After")));
     }
 
     private Long parseRetryAfter(String value) {

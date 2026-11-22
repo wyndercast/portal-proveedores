@@ -14,6 +14,7 @@ public record ValuekeepWorkOrderResource(
         String schemaEntityStateDescription,
         String description,
         String Description,
+        String remarks,
         Integer asset,
         Integer assetType,
         String location,
@@ -34,13 +35,30 @@ public record ValuekeepWorkOrderResource(
         List<DirectTaskResource> workOrderTasks) {
 
     public ValuekeepWorkOrderResource(String id, String workOrderKey, String responsible) {
-        this(id, workOrderKey, responsible, null, null, null, null, null, null, null, null,
+        this(id, workOrderKey, responsible, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public ValuekeepWorkOrderResource(String id, String workOrderKey, String responsible, String state) {
-        this(id, workOrderKey, responsible, state, null, null, null, null, null, null, null,
+        this(id, workOrderKey, responsible, state, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /** Compatibility constructor for fixtures using the canonical resource shape before general remarks were exposed. */
+    public ValuekeepWorkOrderResource(
+            String id, String workOrderKey, String responsible, String state, String schemaEntityState,
+            String schemaEntityStateKey, String schemaEntityStateDescription, String description, String Description,
+            Integer asset, Integer assetType, String location, String equipment, String tool, String workshop,
+            String locationDescription, String LocationDescription, String equipmentDescription,
+            String EquipmentDescription, String toolDescription, String ToolDescription, String operatingState,
+            String operatingStateDescription, String expectedDate, String expectedEndDate,
+            List<MaintenancePlanResource> workOrderMaintenancePlans,
+            List<DirectTaskResource> workOrderTasks) {
+        this(id, workOrderKey, responsible, state, schemaEntityState, schemaEntityStateKey,
+                schemaEntityStateDescription, description, Description, null, asset, assetType, location,
+                equipment, tool, workshop, locationDescription, LocationDescription, equipmentDescription,
+                EquipmentDescription, toolDescription, ToolDescription, operatingState, operatingStateDescription,
+                expectedDate, expectedEndDate, workOrderMaintenancePlans, workOrderTasks);
     }
 
     /** Compatibility constructor for fixtures using the previous canonical resource shape. */
@@ -54,7 +72,7 @@ public record ValuekeepWorkOrderResource(
             List<MaintenancePlanResource> workOrderMaintenancePlans,
             List<DirectTaskResource> workOrderTasks) {
         this(id, workOrderKey, responsible, state, schemaEntityState, schemaEntityStateKey, null,
-                description, Description, asset, assetType, location, equipment, tool, null, locationDescription,
+                description, Description, null, asset, assetType, location, equipment, tool, null, locationDescription,
                 LocationDescription, equipmentDescription, EquipmentDescription, toolDescription, ToolDescription,
                 operatingState, null, expectedDate, expectedEndDate, workOrderMaintenancePlans, workOrderTasks);
     }
@@ -68,7 +86,7 @@ public record ValuekeepWorkOrderResource(
             String expectedDate, String expectedEndDate,
             List<MaintenancePlanResource> workOrderMaintenancePlans,
             List<DirectTaskResource> workOrderTasks) {
-        this(id, workOrderKey, responsible, state, schemaEntityState, null, null, description, Description, asset, assetType,
+        this(id, workOrderKey, responsible, state, schemaEntityState, null, null, description, Description, null, asset, assetType,
                 null, null, null, null, locationDescription, LocationDescription, equipmentDescription,
                 EquipmentDescription, toolDescription, null, operatingState, null, expectedDate, expectedEndDate,
                 workOrderMaintenancePlans, workOrderTasks);

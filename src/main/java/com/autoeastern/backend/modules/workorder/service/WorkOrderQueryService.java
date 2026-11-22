@@ -4,10 +4,12 @@ import com.autoeastern.backend.modules.access.domain.ProviderSession;
 import com.autoeastern.backend.modules.access.domain.ValuekeepWorkOrderResource;
 import com.autoeastern.backend.modules.access.service.ProviderAuthorizationService;
 import com.autoeastern.backend.modules.workorder.dto.WorkOrderResponse;
+import com.autoeastern.backend.modules.workorder.dto.WorkOrderAttachmentResponse;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepClient;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepVerificationTypesResource;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepSchemaEntityStatesResource;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepWorkshopResource;
+import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepOperatingStateResource;
 import com.autoeastern.backend.shared.integration.valuekeep.config.ValuekeepProperties;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -84,7 +86,9 @@ public class WorkOrderQueryService {
 
         if (verificationCodes.isEmpty()) {
             return loadStateDescriptions().thenCompose(states -> loadWorkshopDescription(resource)
-                    .thenApply(workshopDescription -> map(resource, plans, Map.of(), stateDescription(resource, states), workshopDescription, session)));
+                    .thenCompose(workshopDescription -> loadOperatingStateDescription(resource)
+                            .thenCompose(operatingStateDescription -> loadAttachments(resource.id())
+                                    .thenApply(attachments -> map(resource, plans, Map.of(), stateDescription(resource, states), workshopDescription, operatingStateDescription, attachments, session)))));
         }
 
         Map<String, CompletableFuture<List<WorkOrderResponse.VerificationOptionResponse>>> futures =
@@ -99,7 +103,45 @@ public class WorkOrderQueryService {
                         LinkedHashMap::new)))
                 .thenCompose(options -> loadStateDescriptions()
                         .thenCompose(states -> loadWorkshopDescription(resource)
-                                .thenApply(workshopDescription -> map(resource, plans, options, stateDescription(resource, states), workshopDescription, session))));
+                                .thenCompose(workshopDescription -> loadOperatingStateDescription(resource)
+                                        .thenCompose(operatingStateDescription -> loadAttachments(resource.id())
+                                                .thenApply(attachments -> map(resource, plans, options, stateDescription(resource, states), workshopDescription, operatingStateDescription, attachments, session))))));
+    }
+
+    private CompletableFuture<String> loadOperatingStateDescription(ValuekeepWorkOrderResource resource) {
+        String operatingStateKey = resource.operatingState();
+        String fallback = resource.operatingStateDescription();
+        if (operatingStateKey == null || operatingStateKey.isBlank()) return CompletableFuture.completedFuture(fallback);
+        try {
+            return valuekeepClient.get("maintenanceCore/operatingStates/" + operatingStateKey, ValuekeepOperatingStateResource.class)
+                    .handle((operatingState, error) -> error == null && operatingState != null
+                            && operatingState.description() != null && !operatingState.description().isBlank()
+                            ? operatingState.description() : fallback);
+        } catch (RuntimeException exception) {
+            return CompletableFuture.completedFuture(fallback);
+        }
+    }
+
+    private CompletableFuture<List<WorkOrderAttachmentResponse>> loadAttachments(String workOrderId) {
+        if (workOrderId == null || workOrderId.isBlank()) return CompletableFuture.completedFuture(List.of());
+        return valuekeepClient.getWorkOrderAttachments(workOrderId)
+                .handle((attachments, error) -> error != null || attachments == null ? List.of() : attachments.stream()
+                        .filter(attachment -> attachment != null && attachment.index() != null && attachment.index() >= 0
+                                && isImage(attachment.mediaType()) && attachment.name() != null && !attachment.name().isBlank())
+                        .map(attachment -> new WorkOrderAttachmentResponse(
+                                attachment.name(), attachment.index(), attachment.size() == null ? 0L : Math.round(attachment.size()),
+                                attachment.mediaType(), "/api/v1/provider/work-order/attachments/" + attachment.index()))
+                        .toList());
+    }
+
+    private boolean isImage(String mediaType) {
+        if (mediaType == null || mediaType.isBlank()) return false;
+        String normalized = mediaType.trim().toLowerCase();
+        return normalized.startsWith("image/")
+                || normalized.equals("application/png")
+                || normalized.equals("application/jpeg")
+                || normalized.equals("application/jpg")
+                || normalized.equals("application/webp");
     }
 
     private CompletableFuture<Map<String, String>> loadStateDescriptions() {
@@ -150,6 +192,8 @@ public class WorkOrderQueryService {
             Map<String, List<WorkOrderResponse.VerificationOptionResponse>> options,
             String stateDescription,
             String workshopDescription,
+            String operatingStateDescription,
+            List<WorkOrderAttachmentResponse> attachments,
             ProviderSession session) {
         List<WorkOrderResponse.MaintenancePlanResponse> mappedPlans = plans.stream()
                 .map(plan -> new WorkOrderResponse.MaintenancePlanResponse(
@@ -172,11 +216,22 @@ public class WorkOrderQueryService {
         boolean closed = !valuekeepProperties.getClosingStateKey().isBlank()
                 && valuekeepProperties.getClosingStateKey().equals(stateKey);
         return new WorkOrderResponse(
-                resource.id(), session.getWorkOrderNumber(), firstNonBlank(resource.description(), resource.Description()),
+                resource.id(), session.getWorkOrderNumber(), firstNonBlank(resource.description(), resource.Description()), resource.remarks(),
                 stateKey, stateDescription, resource.asset() != null ? resource.asset() : resource.assetType(),
                 assetLabel(resource.asset() != null ? resource.asset() : resource.assetType()), assetCode(resource), assetDescription(resource), resource.workshop(), workshopDescription,
-                resource.operatingState(), resource.operatingStateDescription(), resource.expectedDate(), resource.expectedEndDate(), closed, mappedPlans,
-                new WorkOrderResponse.Summary(mappedPlans.size(), taskCount));
+                resource.operatingState(), operatingStateDescription, resource.expectedDate(), resource.expectedEndDate(), closed, mappedPlans,
+                attachments, new WorkOrderResponse.Summary(mappedPlans.size(), taskCount));
+    }
+
+    public CompletableFuture<ValuekeepClient.AttachmentContent> downloadAttachment(Authentication authentication, int index) {
+        ProviderSession session = authorizationService.requireAuthenticatedSession(authentication);
+        return valuekeepClient.getWorkOrderAttachments(session.getWorkOrderId()).thenCompose(attachments -> attachments.stream()
+                .filter(attachment -> attachment != null && attachment.index() != null && attachment.index() == index
+                        && isImage(attachment.mediaType()) && attachment.name() != null && !attachment.name().isBlank())
+                .findFirst()
+                .map(attachment -> valuekeepClient.downloadWorkOrderAttachment(session.getWorkOrderId(), attachment.name(), index))
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "La fotografía no existe.")));
     }
 
     private String assetCode(ValuekeepWorkOrderResource resource) {

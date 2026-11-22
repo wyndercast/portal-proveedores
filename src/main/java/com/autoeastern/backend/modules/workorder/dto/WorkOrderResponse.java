@@ -6,6 +6,7 @@ public record WorkOrderResponse(
         String id,
         String number,
         String description,
+        String remarks,
         String state,
         String stateDescription,
         Integer asset,
@@ -20,6 +21,7 @@ public record WorkOrderResponse(
         String expectedEndDate,
         boolean closed,
         List<MaintenancePlanResponse> maintenancePlans,
+        List<WorkOrderAttachmentResponse> attachments,
         Summary summary) {
 
     public record MaintenancePlanResponse(

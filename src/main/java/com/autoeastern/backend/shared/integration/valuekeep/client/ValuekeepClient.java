@@ -1,5 +1,6 @@
 package com.autoeastern.backend.shared.integration.valuekeep.client;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public interface ValuekeepClient {
@@ -14,4 +15,14 @@ public interface ValuekeepClient {
     default CompletableFuture<Void> uploadWorkOrderDocument(String workOrderId, String fileName, byte[] pdf) {
         return CompletableFuture.failedFuture(new UnsupportedOperationException("La carga de documentos no está disponible."));
     }
+
+    default CompletableFuture<List<ValuekeepWorkOrderAttachment>> getWorkOrderAttachments(String workOrderId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("La consulta de adjuntos no está disponible."));
+    }
+
+    default CompletableFuture<AttachmentContent> downloadWorkOrderAttachment(String workOrderId, String fileName, int index) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("La descarga de adjuntos no está disponible."));
+    }
+
+    record AttachmentContent(byte[] bytes, String mediaType) { }
 }

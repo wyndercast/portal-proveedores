@@ -3,9 +3,11 @@ package com.autoeastern.backend.modules.workorder.controller;
 import com.autoeastern.backend.modules.workorder.dto.WorkOrderResponse;
 import com.autoeastern.backend.modules.workorder.service.WorkOrderQueryService;
 import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.slf4j.Logger;
@@ -41,6 +43,29 @@ public class WorkOrderController {
             throw exception;
         } catch (RuntimeException exception) {
             LOGGER.error("Error construyendo respuesta de work-order", exception);
+            throw exception;
+        }
+    }
+
+    @GetMapping(value = "/attachments/{index}", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public ResponseEntity<byte[]> getAttachment(Authentication authentication, @PathVariable int index) {
+        try {
+            var attachment = queryService.downloadAttachment(authentication, index).join();
+            MediaType mediaType;
+            try {
+                String rawMediaType = attachment.mediaType()
+                        .replace("application/png", "image/png")
+                        .replace("application/jpeg", "image/jpeg")
+                        .replace("application/jpg", "image/jpeg")
+                        .replace("application/webp", "image/webp");
+                mediaType = MediaType.parseMediaType(rawMediaType);
+                if (!mediaType.getType().equalsIgnoreCase("image")) mediaType = MediaType.APPLICATION_OCTET_STREAM;
+            } catch (IllegalArgumentException exception) {
+                mediaType = MediaType.APPLICATION_OCTET_STREAM;
+            }
+            return ResponseEntity.ok().cacheControl(CacheControl.noStore()).contentType(mediaType).body(attachment.bytes());
+        } catch (CompletionException exception) {
+            if (exception.getCause() instanceof RuntimeException runtimeException) throw runtimeException;
             throw exception;
         }
     }

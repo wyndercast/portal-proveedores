@@ -63,30 +63,11 @@ public class FinalizationService {
             String current = currentState(workOrder);
             if (!allowed.contains(current) && !properties.getClosingStateKey().equals(current)) throw new FinalizationException(HttpStatus.CONFLICT, "La OT no está en un estado permitido para finalizar.");
             if (properties.getClosingStateKey().equals(current)) throw new FinalizationException(HttpStatus.CONFLICT, "La OT ya está cerrada y no admite nuevas modificaciones.");
-            return updateRemarks(session, request.remarks())
-                    .thenCompose(ignored -> reportService.upload(authentication, request.previewId()))
+            return reportService.upload(authentication, request.previewId())
                     .thenCompose(upload -> stateTransitionService.transition(session, properties.getClosingStateKey(), "Trabajo ejecutado, verificado y documentado."))
                     .thenCompose(ignored -> confirmState(session, rawToken));
         }).whenComplete((ignored, error) -> operations.remove(session.getWorkOrderNumber()));
     }
-
-    private CompletableFuture<Void> updateRemarks(ProviderSession session, String remarks) {
-        String path = "maintenance/workOrders/" + properties.getCompanyKey() + "/"
-                + session.getWorkOrderNumber() + "/remarks";
-        String value = remarks == null ? "" : remarks.trim();
-        return valuekeepClient.put(path, jsonString(value), Void.class);
-    }
-
-    private String jsonString(String value) {
-        return "\"" + value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\r", "\\r")
-                .replace("\n", "\\n")
-                .replace("\t", "\\t")
-                + "\"";
-    }
-
 
     private CompletableFuture<FinalizationResponse> confirmState(ProviderSession session, String rawToken) {
         String path = "maintenance/workOrders/" + properties.getCompanyKey() + "/" + session.getWorkOrderNumber();
