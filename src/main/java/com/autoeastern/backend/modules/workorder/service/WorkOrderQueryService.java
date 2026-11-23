@@ -10,6 +10,7 @@ import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepVeri
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepSchemaEntityStatesResource;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepWorkshopResource;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepOperatingStateResource;
+import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepEntityStateTransitionHistoryResource;
 import com.autoeastern.backend.shared.integration.valuekeep.config.ValuekeepProperties;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @Service
 public class WorkOrderQueryService {
@@ -87,8 +90,9 @@ public class WorkOrderQueryService {
         if (verificationCodes.isEmpty()) {
             return loadStateDescriptions().thenCompose(states -> loadWorkshopDescription(resource)
                     .thenCompose(workshopDescription -> loadOperatingStateDescription(resource)
-                            .thenCompose(operatingStateDescription -> loadAttachments(resource.id())
-                                    .thenApply(attachments -> map(resource, plans, Map.of(), stateDescription(resource, states), workshopDescription, operatingStateDescription, attachments, session)))));
+                            .thenCompose(operatingStateDescription -> loadWorkOrderDates(resource, session.getWorkOrderNumber())
+                                    .thenCompose(dates -> loadAttachments(resource.id())
+                                            .thenApply(attachments -> map(resource, plans, Map.of(), stateDescription(resource, states), workshopDescription, operatingStateDescription, dates, attachments, session))))));
         }
 
         Map<String, CompletableFuture<List<WorkOrderResponse.VerificationOptionResponse>>> futures =
@@ -104,8 +108,9 @@ public class WorkOrderQueryService {
                 .thenCompose(options -> loadStateDescriptions()
                         .thenCompose(states -> loadWorkshopDescription(resource)
                                 .thenCompose(workshopDescription -> loadOperatingStateDescription(resource)
-                                        .thenCompose(operatingStateDescription -> loadAttachments(resource.id())
-                                                .thenApply(attachments -> map(resource, plans, options, stateDescription(resource, states), workshopDescription, operatingStateDescription, attachments, session))))));
+                                        .thenCompose(operatingStateDescription -> loadWorkOrderDates(resource, session.getWorkOrderNumber())
+                                                .thenCompose(dates -> loadAttachments(resource.id())
+                                                        .thenApply(attachments -> map(resource, plans, options, stateDescription(resource, states), workshopDescription, operatingStateDescription, dates, attachments, session)))))));
     }
 
     private CompletableFuture<String> loadOperatingStateDescription(ValuekeepWorkOrderResource resource) {
@@ -132,6 +137,38 @@ public class WorkOrderQueryService {
                                 attachment.name(), attachment.index(), attachment.size() == null ? 0L : Math.round(attachment.size()),
                                 attachment.mediaType(), "/api/v1/provider/work-order/attachments/" + attachment.index()))
                         .toList());
+    }
+
+    private CompletableFuture<WorkOrderDates> loadWorkOrderDates(ValuekeepWorkOrderResource resource, String workOrderKey) {
+        String fallbackStart = null;
+        String currentDate = OffsetDateTime.now(ZoneOffset.UTC).toString();
+        if (workOrderKey == null || workOrderKey.isBlank()) return CompletableFuture.completedFuture(new WorkOrderDates(fallbackStart, currentDate));
+        try {
+            return valuekeepClient.getStateTransitionHistories(workOrderKey)
+                    .handle((transitions, error) -> {
+                        String start = error == null && transitions != null
+                                ? transitions.stream()
+                                .filter(transition -> isOt04Transition(transition, workOrderKey))
+                                .map(ValuekeepEntityStateTransitionHistoryResource.Item::dateTransition)
+                                .filter(value -> value != null && !value.isBlank())
+                                .findFirst().orElse(fallbackStart)
+                                : fallbackStart;
+                        return new WorkOrderDates(start, currentDate);
+                    });
+        } catch (RuntimeException exception) {
+            return CompletableFuture.completedFuture(new WorkOrderDates(fallbackStart, currentDate));
+        }
+    }
+
+    private boolean isOt04Transition(ValuekeepEntityStateTransitionHistoryResource.Item transition, String workOrderKey) {
+        return transition != null
+                && "OT03".equalsIgnoreCase(normalize(transition.newState()))
+                && "WORKORDERS.MAINTENANCE".equalsIgnoreCase(normalize(transition.schemaEntity()))
+                && normalize(workOrderKey).equals(normalize(transition.entityNaturalKey()));
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private boolean isImage(String mediaType) {
@@ -193,6 +230,7 @@ public class WorkOrderQueryService {
             String stateDescription,
             String workshopDescription,
             String operatingStateDescription,
+            WorkOrderDates dates,
             List<WorkOrderAttachmentResponse> attachments,
             ProviderSession session) {
         List<WorkOrderResponse.MaintenancePlanResponse> mappedPlans = plans.stream()
@@ -219,9 +257,12 @@ public class WorkOrderQueryService {
                 resource.id(), session.getWorkOrderNumber(), firstNonBlank(resource.description(), resource.Description()), resource.remarks(),
                 stateKey, stateDescription, resource.asset() != null ? resource.asset() : resource.assetType(),
                 assetLabel(resource.asset() != null ? resource.asset() : resource.assetType()), assetCode(resource), assetDescription(resource), resource.workshop(), workshopDescription,
-                resource.operatingState(), operatingStateDescription, resource.expectedDate(), resource.expectedEndDate(), closed, mappedPlans,
+                resource.operatingState(), operatingStateDescription, resource.expectedDate(), resource.expectedEndDate(),
+                dates.start(), dates.end(), closed, mappedPlans,
                 attachments, new WorkOrderResponse.Summary(mappedPlans.size(), taskCount));
     }
+
+    private record WorkOrderDates(String start, String end) { }
 
     public CompletableFuture<ValuekeepClient.AttachmentContent> downloadAttachment(Authentication authentication, int index) {
         ProviderSession session = authorizationService.requireAuthenticatedSession(authentication);

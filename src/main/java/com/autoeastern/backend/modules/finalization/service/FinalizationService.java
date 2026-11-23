@@ -9,6 +9,8 @@ import com.autoeastern.backend.modules.finalization.dto.FinalizationResponse;
 import com.autoeastern.backend.modules.report.dto.ReportUploadResponse;
 import com.autoeastern.backend.modules.report.service.ReportService;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepClient;
+import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepOperatingStateResource;
+import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepEntityStateTransitionHistoryResource;
 import com.autoeastern.backend.shared.integration.valuekeep.config.ValuekeepProperties;
 import com.autoeastern.backend.modules.workorder.service.WorkOrderStateTransitionService;
 import org.springframework.http.HttpStatus;
@@ -21,6 +23,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 
 @Service
 public class FinalizationService {
@@ -58,15 +64,96 @@ public class FinalizationService {
         if (properties.getClosingStateKey().isBlank() || allowed.isEmpty()
                 || allowed.contains(properties.getClosingStateKey())) throw new FinalizationException(HttpStatus.SERVICE_UNAVAILABLE, "La configuración de estados de cierre no está completa.");
         if (operations.putIfAbsent(session.getWorkOrderNumber(), Boolean.TRUE) != null) throw new FinalizationException(HttpStatus.CONFLICT, "Ya existe un cierre en curso para esta OT.");
+        OffsetDateTime closureRequestedAt = OffsetDateTime.now(ZoneOffset.UTC);
         String path = "maintenance/workOrders/" + properties.getCompanyKey() + "/" + session.getWorkOrderNumber();
         return valuekeepClient.get(path, ValuekeepWorkOrderResource.class).thenCompose(workOrder -> {
             String current = currentState(workOrder);
             if (!allowed.contains(current) && !properties.getClosingStateKey().equals(current)) throw new FinalizationException(HttpStatus.CONFLICT, "La OT no está en un estado permitido para finalizar.");
             if (properties.getClosingStateKey().equals(current)) throw new FinalizationException(HttpStatus.CONFLICT, "La OT ya está cerrada y no admite nuevas modificaciones.");
             return reportService.upload(authentication, request.previewId())
+                    .thenCompose(upload -> updateDownTimeIfRequired(workOrder, session.getWorkOrderNumber(), closureRequestedAt))
                     .thenCompose(upload -> stateTransitionService.transition(session, properties.getClosingStateKey(), "Trabajo ejecutado, verificado y documentado."))
                     .thenCompose(ignored -> confirmState(session, rawToken));
         }).whenComplete((ignored, error) -> operations.remove(session.getWorkOrderNumber()));
+    }
+
+    private CompletableFuture<Void> updateDownTimeIfRequired(
+            ValuekeepWorkOrderResource workOrder, String workOrderKey, OffsetDateTime closureRequestedAt) {
+        String operatingStateKey = workOrder.operatingState();
+        if (operatingStateKey == null || operatingStateKey.isBlank()) return CompletableFuture.completedFuture(null);
+        String path = "maintenanceCore/operatingStates/" + operatingStateKey;
+        return valuekeepClient.get(path, ValuekeepOperatingStateResource.class)
+                .thenCompose(operatingState -> {
+                    if (operatingState == null || !Boolean.TRUE.equals(operatingState.isDownState())) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    return valuekeepClient.getStateTransitionHistories(workOrderKey)
+                            .thenCompose(transitions -> {
+                                String startDate = findOt04Date(transitions, workOrderKey);
+                                if (startDate == null) {
+                                    throw new FinalizationException(HttpStatus.CONFLICT,
+                                            "No se encontró la fecha de inicio OT03 para calcular el tiempo de indisponibilidad.");
+                                }
+                                return valuekeepClient.updateDownAndUpTimeHistoriesFromWorkOrder(
+                                        workOrderKey, totalHours(startDate, closureRequestedAt));
+                            });
+                })
+                .exceptionallyCompose(error -> {
+                    Throwable cause = unwrap(error);
+                    if (cause instanceof FinalizationException finalizationException) {
+                        return CompletableFuture.failedFuture(finalizationException);
+                    }
+                    return CompletableFuture.failedFuture(new FinalizationException(HttpStatus.BAD_GATEWAY,
+                            "No fue posible actualizar el tiempo de indisponibilidad del activo."));
+                });
+    }
+
+    private String findOt04Date(List<ValuekeepEntityStateTransitionHistoryResource.Item> transitions, String workOrderKey) {
+        if (transitions == null) return null;
+        return transitions.stream()
+                .filter(transition -> transition != null
+                        && "OT03".equalsIgnoreCase(normalize(transition.newState()))
+                        && "WORKORDERS.MAINTENANCE".equalsIgnoreCase(normalize(transition.schemaEntity()))
+                        && normalize(workOrderKey).equals(normalize(transition.entityNaturalKey())))
+                .map(ValuekeepEntityStateTransitionHistoryResource.Item::dateTransition)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String totalHours(String startDate, OffsetDateTime endDate) {
+        try {
+            OffsetDateTime start = OffsetDateTime.parse(startDate);
+            Duration duration = Duration.between(start, endDate);
+            if (duration.isNegative()) {
+                throw new FinalizationException(HttpStatus.CONFLICT, "La fecha de inicio OT03 no puede ser posterior al cierre.");
+            }
+            long seconds = duration.getSeconds();
+            long days = seconds / 86_400;
+            long hours = (seconds % 86_400) / 3_600;
+            long minutes = (seconds % 3_600) / 60;
+            long remainingSeconds = seconds % 60;
+            return days > 0
+                    ? "%d.%02d:%02d:%02d".formatted(days, hours, minutes, remainingSeconds)
+                    : "%02d:%02d:%02d".formatted(hours, minutes, remainingSeconds);
+        } catch (DateTimeParseException exception) {
+            throw new FinalizationException(HttpStatus.CONFLICT, "La fecha de inicio OT03 no tiene un formato válido.");
+        }
+    }
+
+    private String firstNonBlank(String first, String fallback) {
+        return first != null && !first.isBlank() ? first : fallback;
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private Throwable unwrap(Throwable error) {
+        Throwable cause = error;
+        while ((cause instanceof java.util.concurrent.CompletionException || cause instanceof java.util.concurrent.ExecutionException)
+                && cause.getCause() != null) cause = cause.getCause();
+        return cause;
     }
 
     private CompletableFuture<FinalizationResponse> confirmState(ProviderSession session, String rawToken) {

@@ -24,5 +24,17 @@ public interface ValuekeepClient {
         return CompletableFuture.failedFuture(new UnsupportedOperationException("La descarga de adjuntos no está disponible."));
     }
 
+    default CompletableFuture<List<ValuekeepStateTransitionResource>> getStateTransitions(String workOrderKey) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("La consulta de transiciones no está disponible."));
+    }
+
+    default CompletableFuture<List<ValuekeepEntityStateTransitionHistoryResource.Item>> getStateTransitionHistories(String workOrderKey) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("La consulta del historial de transiciones no está disponible."));
+    }
+
+    default CompletableFuture<Void> updateDownAndUpTimeHistoriesFromWorkOrder(String workOrderKey, String totalHours) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException("La actualización del tiempo de indisponibilidad no está disponible."));
+    }
+
     record AttachmentContent(byte[] bytes, String mediaType) { }
 }

@@ -20,6 +20,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
@@ -170,6 +171,52 @@ public class ValuekeepRestClient implements ValuekeepClient {
         }, executor);
     }
 
+    @Override
+    public CompletableFuture<List<ValuekeepStateTransitionResource>> getStateTransitions(String workOrderKey) {
+        return rateLimiter.acquire().thenApplyAsync(ignored -> {
+            String token = tokenService.getAccessToken();
+            URI uri = buildApiUri("maintenance/workOrders/getStateTransitions/" + workOrderKey);
+            try {
+                return restClient.get().uri(uri)
+                        .headers(headers -> { headers.setBearerAuth(token); headers.setAccept(List.of(MediaType.APPLICATION_JSON)); })
+                        .exchange((request, response) -> {
+                            int status = response.getStatusCode().value();
+                            if (status < 200 || status >= 300) throw valuekeepError("consultar las transiciones", status, response);
+                            byte[] body = response.getBody() == null ? new byte[0] : response.getBody().readAllBytes();
+                            if (body.length == 0) return List.of();
+                            try {
+                                return Arrays.asList(objectMapper.readValue(body, ValuekeepStateTransitionResource[].class));
+                            } catch (JacksonException exception) {
+                                throw new ValuekeepClientException("La respuesta de transiciones de Valuekeep no tiene un formato válido.", 502, exception);
+                            }
+                        });
+            } catch (ResourceAccessException exception) {
+                throw new ValuekeepTimeoutException("Timeout al consultar las transiciones de Valuekeep.", exception);
+            } catch (ValuekeepClientException exception) {
+                if (exception.getStatusCode() == 401) tokenService.invalidate(token);
+                throw exception;
+            } catch (Exception exception) {
+                throw new ValuekeepClientException("No fue posible consultar las transiciones de Valuekeep.", 502, exception);
+            }
+        }, executor);
+    }
+
+    @Override
+    public CompletableFuture<List<ValuekeepEntityStateTransitionHistoryResource.Item>> getStateTransitionHistories(String workOrderKey) {
+        String safeWorkOrderKey = workOrderKey == null ? "" : workOrderKey.replace("'", "''");
+        String path = "businessCore/vKEntittyStateTransitionHistories/odata"
+                + "?$select=NewState,DateTransition,EntityNaturalKey,SchemaEntity"
+                + "&$filter=SchemaEntity eq 'WORKORDERS.MAINTENANCE' and EntityNaturalKey eq '" + safeWorkOrderKey + "'";
+        return get(path, ValuekeepEntityStateTransitionHistoryResource.class)
+                .thenApply(response -> response == null ? List.of() : response.records());
+    }
+
+    @Override
+    public CompletableFuture<Void> updateDownAndUpTimeHistoriesFromWorkOrder(String workOrderKey, String totalHours) {
+        String path = "assetManagement/downAndUpTimeHistories/updateDownAndUpTimeHistoriesFromWorkOrder/" + workOrderKey;
+        return post(path, Map.of("workOrderKey", workOrderKey, "totalHours", totalHours), Void.class);
+    }
+
     private <T> CompletableFuture<T> request(
             HttpMethod method,
             String resourcePath,
@@ -301,6 +348,13 @@ public class ValuekeepRestClient implements ValuekeepClient {
     private URI buildAttachmentsUri(String workOrderId) {
         return UriComponentsBuilder.fromUriString(properties.getUploadBaseUrl())
                 .pathSegment(properties.getTenantKey(), properties.getOrgKey(), "maintenance", "workorders", workOrderId, "attachments")
+                .build().encode().toUri();
+    }
+
+    private URI buildApiUri(String resourcePath) {
+        return UriComponentsBuilder.fromUriString(properties.getBaseUrl())
+                .pathSegment(properties.getTenantKey(), properties.getOrgKey())
+                .pathSegment(resourcePath.replaceFirst("^/", "").split("/"))
                 .build().encode().toUri();
     }
 

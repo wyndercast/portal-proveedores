@@ -10,6 +10,7 @@ import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepClie
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepSchemaEntityStatesResource;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepWorkshopResource;
 import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepOperatingStateResource;
+import com.autoeastern.backend.shared.integration.valuekeep.client.ValuekeepEntityStateTransitionHistoryResource;
 import com.autoeastern.backend.shared.integration.valuekeep.config.ValuekeepProperties;
 import com.autoeastern.backend.shared.integration.valuekeep.exception.ValuekeepClientException;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
@@ -97,15 +98,16 @@ public class ReportService {
                                             })));
                 })
                 .thenCompose(model -> loadOperatingStateDescription(model.workOrder())
-                        .thenApply(operatingStateDescription -> {
-                            Map<String, Object> view = buildView(model.workOrder(), model.tasks(), model.stateKey(), model.stateDescription(), model.workshopDescription(), operatingStateDescription, remarks, technicianName.trim(), receiverName.trim(), technicianSignature, receiverSignature, safePhotos);
-                            byte[] pdf = render(view);
-                            String id = UUID.randomUUID().toString();
-                            String fileName = safeFileName(session.getWorkOrderNumber());
-                            String hash = sha256(pdf);
-                            previews.put(id, new PreviewArtifact(model.workOrder().id(), fileName, hash, pdf, System.currentTimeMillis() + PREVIEW_TTL_MILLIS));
-                            return new GeneratedReport(pdf, new ReportPreviewResponse(id, fileName, hash));
-                        }));
+                        .thenCompose(operatingStateDescription -> loadWorkOrderDates(model.workOrder(), session.getWorkOrderNumber())
+                                .thenApply(dates -> {
+                                    Map<String, Object> view = buildView(model.workOrder(), model.tasks(), model.stateKey(), model.stateDescription(), model.workshopDescription(), operatingStateDescription, dates.start(), dates.end(), remarks, technicianName.trim(), receiverName.trim(), technicianSignature, receiverSignature, safePhotos);
+                                    byte[] pdf = render(view);
+                                    String id = UUID.randomUUID().toString();
+                                    String fileName = safeFileName(session.getWorkOrderNumber());
+                                    String hash = sha256(pdf);
+                                    previews.put(id, new PreviewArtifact(model.workOrder().id(), fileName, hash, pdf, System.currentTimeMillis() + PREVIEW_TTL_MILLIS));
+                                    return new GeneratedReport(pdf, new ReportPreviewResponse(id, fileName, hash));
+                                })));
     }
 
     private CompletableFuture<Map<String, String>> loadStateDescriptions() {
@@ -157,6 +159,38 @@ public class ReportService {
         } catch (RuntimeException exception) {
             return CompletableFuture.completedFuture(fallback);
         }
+    }
+
+    private CompletableFuture<ReportDates> loadWorkOrderDates(ValuekeepWorkOrderResource workOrder, String workOrderKey) {
+        String fallbackStart = null;
+        String currentDate = OffsetDateTime.now(ZoneOffset.UTC).toString();
+        if (workOrderKey == null || workOrderKey.isBlank()) return CompletableFuture.completedFuture(new ReportDates(fallbackStart, currentDate));
+        try {
+            return valuekeepClient.getStateTransitionHistories(workOrderKey)
+                    .handle((transitions, error) -> {
+                        String start = error == null && transitions != null
+                                ? transitions.stream()
+                                .filter(transition -> isOt04Transition(transition, workOrderKey))
+                                .map(ValuekeepEntityStateTransitionHistoryResource.Item::dateTransition)
+                                .filter(value -> value != null && !value.isBlank())
+                                .findFirst().orElse(fallbackStart)
+                                : fallbackStart;
+                        return new ReportDates(start, currentDate);
+                    });
+        } catch (RuntimeException exception) {
+            return CompletableFuture.completedFuture(new ReportDates(fallbackStart, currentDate));
+        }
+    }
+
+    private boolean isOt04Transition(ValuekeepEntityStateTransitionHistoryResource.Item transition, String workOrderKey) {
+        return transition != null
+                && "OT03".equalsIgnoreCase(normalize(transition.newState()))
+                && "WORKORDERS.MAINTENANCE".equalsIgnoreCase(normalize(transition.schemaEntity()))
+                && normalize(workOrderKey).equals(normalize(transition.entityNaturalKey()));
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim();
     }
 
     public byte[] previewBytes(String previewId, Authentication authentication) {
@@ -234,16 +268,16 @@ public class ReportService {
         return CompletableFuture.completedFuture(new VerifiedModel(workOrder, tasks, null, null, null));
     }
 
-    private Map<String, Object> buildView(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateKey, String stateDescription, String workshopDescription, String operatingStateDescription, String generalRemarks,
+    private Map<String, Object> buildView(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateKey, String stateDescription, String workshopDescription, String operatingStateDescription, String startDate, String endDate, String generalRemarks,
                                            String technicianName, String receiverName, MultipartFile technicianSignature,
                                            MultipartFile receiverSignature, List<MultipartFile> photos) {
         Map<String, Object> view = new HashMap<>();
         view.put("generatedAt", formatDateTime(OffsetDateTime.now(ZoneOffset.UTC).toString())); view.put("number", workOrder.workOrderKey());
         view.put("description", first(workOrder.description(), workOrder.Description())); view.put("state", stateLabel(stateKey, stateDescription));
         view.put("assetType", assetLabel(workOrder.asset() != null ? workOrder.asset() : workOrder.assetType()));
-        view.put("assetCode", assetLabel(workOrder)); view.put("assetDescription", assetDescription(workOrder)); view.put("workshop", workshopLabel(workOrder.workshop(), workshopDescription)); view.put("operatingState", displayOperatingState(workOrder.operatingState(), operatingStateDescription));
-        view.put("expectedDateFormatted", formatDateTime(workOrder.expectedDate()));
-        view.put("expectedEndDateFormatted", formatDateTime(workOrder.expectedEndDate()));
+        view.put("assetCode", assetLabel(workOrder)); view.put("workshop", workshopLabel(workOrder.workshop(), workshopDescription)); view.put("operatingState", displayOperatingState(workOrder.operatingState(), operatingStateDescription));
+        view.put("expectedDateFormatted", formatDateTime(startDate));
+        view.put("expectedEndDateFormatted", formatDateTime(endDate));
         view.put("tasks", tasks);
         view.put("serviceRemarks", workOrder.remarks() == null ? "" : workOrder.remarks().trim());
         view.put("generalRemarks", generalRemarks == null ? "" : generalRemarks.trim());
@@ -310,6 +344,7 @@ public class ReportService {
     private void cleanupExpired() { long now = System.currentTimeMillis(); previews.entrySet().removeIf(entry -> entry.getValue().expiresAt() < now); }
 
     public record GeneratedReport(byte[] pdf, ReportPreviewResponse response) { }
+    private record ReportDates(String start, String end) { }
     private record VerifiedModel(ValuekeepWorkOrderResource workOrder, List<Map<String, Object>> tasks, String stateKey, String stateDescription, String workshopDescription) { }
     private static final class PreviewArtifact { private final String workOrderId, fileName, hash; private final byte[] pdf; private final long expiresAt; private boolean uploaded; PreviewArtifact(String w, String f, String h, byte[] p, long e) { workOrderId=w; fileName=f; hash=h; pdf=p; expiresAt=e; } String workOrderId(){return workOrderId;} String fileName(){return fileName;} byte[] pdf(){return pdf;} long expiresAt(){return expiresAt;} boolean uploaded(){return uploaded;} void markUploaded(){uploaded=true;} void markNotUploaded(){uploaded=false;} }
 }

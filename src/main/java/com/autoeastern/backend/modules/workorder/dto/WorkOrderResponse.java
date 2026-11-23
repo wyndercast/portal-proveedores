@@ -19,6 +19,8 @@ public record WorkOrderResponse(
         String operatingStateDescription,
         String expectedDate,
         String expectedEndDate,
+        String startDate,
+        String endDate,
         boolean closed,
         List<MaintenancePlanResponse> maintenancePlans,
         List<WorkOrderAttachmentResponse> attachments,

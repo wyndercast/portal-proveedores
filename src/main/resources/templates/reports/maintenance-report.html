@@ -47,12 +47,11 @@
 
   <h2>A. Datos generales</h2>
   <table class="data">
-    <tr><td><span class="label">Orden de trabajo</span><span class="value" th:text="${number}">-</span></td><td><span class="label">Estado de la OT</span><span class="value" th:text="${state ?: 'No disponible'}">-</span></td></tr>
-    <tr><td><span class="label">Activo</span><span class="value" th:text="${assetCode ?: 'No disponible'}">-</span></td><td><span class="label">Tipo de activo</span><span class="value" th:text="${assetType ?: 'No disponible'}">-</span></td></tr>
-    <tr><td><span class="label">Descripción del activo</span><span class="value" th:text="${assetDescription ?: 'No disponible'}">-</span></td><td><span class="label">Estado de funcionamiento</span><span th:text="${operatingState ?: 'No disponible'}">-</span></td></tr>
-    <tr><td><span class="label">Taller</span><span class="value" th:text="${workshop ?: 'No disponible'}">-</span></td><td></td></tr>
-    <tr><td><span class="label">Descripción del servicio</span><span class="value" th:text="${description ?: 'No disponible'}">-</span></td><td></td></tr>
-    <tr><td><span class="label">Fecha prevista</span><span class="date-value" th:text="${expectedDateFormatted}">-</span></td><td><span class="label">Fecha de fin esperada</span><span class="date-value" th:text="${expectedEndDateFormatted}">-</span></td></tr>
+    <tr><td><span class="label">Orden de trabajo #</span><span class="value" th:text="${number}">-</span></td><td><span class="label">Estado de la OT</span><span class="value" th:text="${state ?: 'No disponible'}">-</span></td></tr>
+    <tr><td><span class="label">Tipo de activo</span><span class="value" th:text="${assetType ?: 'No disponible'}">-</span></td><td><span class="label">Estado de funcionamiento</span><span class="value" th:text="${operatingState ?: 'No disponible'}">-</span></td></tr>
+    <tr><td><span class="label">Activo</span><span class="value" th:text="${assetCode ?: 'No disponible'}">-</span></td><td><span class="label">Fecha de inicio</span><span class="date-value" th:text="${expectedDateFormatted}">-</span></td></tr>
+    <tr><td><span class="label">Taller</span><span class="value" th:text="${workshop ?: 'No disponible'}">-</span></td><td><span class="label">Fecha de Fin</span><span class="date-value" th:text="${expectedEndDateFormatted}">-</span></td></tr>
+    <tr><td><span class="label">Descripción</span><span class="value" th:text="${description ?: 'No disponible'}">-</span></td><td></td></tr>
   </table>
 
   <h2>B. Observaciones del servicio</h2>
