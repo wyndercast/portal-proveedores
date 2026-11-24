@@ -63,7 +63,7 @@
   <h2>D. Observaciones generales del trabajo realizado</h2>
   <div class="remarks-block" th:text="${generalRemarks ?: 'Sin observaciones generales del trabajo realizado'}">Sin observaciones generales del trabajo realizado</div>
 
-  <div th:if="${!photos.isEmpty()}"><h2>E. Evidencias fotográficas</h2><table class="photos"><tr th:each="row : ${#numbers.sequence(0, photos.size() - 1, 2)}"><td th:if="${row < photos.size()}"><div class="photo-box"><img th:src="${photos[row].data}"/><div class="caption" th:text="${'Evidencia ' + photos[row].number}">Evidencia</div></div></td><td th:if="${row + 1 < photos.size()}"><div class="photo-box"><img th:src="${photos[row + 1].data}"/><div class="caption" th:text="${'Evidencia ' + photos[row + 1].number}">Evidencia</div></div></td></tr></table></div>
+  <div th:if="${!photos.isEmpty()}"><h2>E. Evidencias fotográficas</h2><table class="photos"><tr th:each="row : ${#numbers.sequence(0, photos.size() - 1, 2)}"><td th:if="${row < photos.size()}"><div class="photo-box"><img th:src="${photos[row].data}"/><div class="caption" th:text="${photos[row].name}">Fotografía</div></div></td><td th:if="${row + 1 < photos.size()}"><div class="photo-box"><img th:src="${photos[row + 1].data}"/><div class="caption" th:text="${photos[row + 1].name}">Fotografía</div></div></td></tr></table></div>
 
   <h2>F. Firmas del servicio</h2>
   <table class="signatures"><tr><td><div class="signature-box"><strong>Técnico ejecutor</strong><span th:text="${technicianName}">Nombre</span><br/><img th:src="${technicianSignature}"/></div></td><td><div class="signature-box"><strong>Recibe / revisa el servicio</strong><span th:text="${receiverName}">Nombre</span><br/><img th:src="${receiverSignature}"/></div></td></tr></table>

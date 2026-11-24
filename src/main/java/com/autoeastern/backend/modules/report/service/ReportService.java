@@ -285,8 +285,13 @@ public class ReportService {
         view.put("technicianName", technicianName); view.put("receiverName", receiverName);
         view.put("technicianSignature", dataUri(technicianSignature, "image/png")); view.put("receiverSignature", dataUri(receiverSignature, "image/png"));
         List<Map<String, Object>> photoRows = new ArrayList<>();
-        for (int i = 0; i < photos.size(); i++) { Map<String, Object> row = new HashMap<>(); row.put("number", i + 1); row.put("data", dataUri(photos.get(i), photos.get(i).getContentType())); photoRows.add(row); }
+        for (int i = 0; i < photos.size(); i++) { Map<String, Object> row = new HashMap<>(); row.put("number", i + 1); row.put("name", safePhotoName(photos.get(i).getOriginalFilename(), i + 1)); row.put("data", dataUri(photos.get(i), photos.get(i).getContentType())); photoRows.add(row); }
         view.put("photos", photoRows); return view;
+    }
+
+    private String safePhotoName(String originalName, int number) {
+        if (originalName == null || originalName.isBlank()) return "Fotografía " + number;
+        return originalName.replaceAll("[\\\\/:*?\"<>|]", "-").trim();
     }
 
     private String displayOperatingState(String code, String description) {
